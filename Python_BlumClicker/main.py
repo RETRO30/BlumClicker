@@ -11,51 +11,37 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.action_chains import ActionChains
 
-
-def detect_green_objects(image, min_neighbors=5):
+def detect_first_green_object(image):
     hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-    mask = cv2.inRange(hsv, (40, 40, 40), (80, 255, 255))
-    filtered_mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
 
-    contours, _ = cv2.findContours(filtered_mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-    centers = []
+    lower_green = np.array([35, 100, 100])
+    upper_green = np.array([85, 255, 255])
+
+    mask = cv2.inRange(hsv, lower_green, upper_green)
+
+    kernel = np.ones((5, 5), np.uint8)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
     for contour in contours:
-        if cv2.contourArea(contour) < 100:
-            continue
-
         M = cv2.moments(contour)
         if M['m00'] != 0:
             cx = int(M['m10'] / M['m00'])
             cy = int(M['m01'] / M['m00'])
-            centers.append((cx, cy))
             cv2.circle(image, (cx, cy), 5, (0, 0, 255), -1)
-            cv2.drawContours(image, [contour], -1, (0, 255, 0), 3)
-            return image, centers
+            return (cx, cy), image
 
-    return image, centers
+    return None, image
 
 
 def show_image(image):
     cv2.imshow("Hello world", image)
     cv2.waitKey(1)
 
-
-def move_mouse_to(x, y):
-    pyautogui.moveTo(x, y, duration=0.25, tween=pyautogui.easeInOutQuad)
-
-
 def wait_for_enter():
     input("Press Enter to continue...")
-
-
-def setup():
-    driver = webdriver.Chrome()
-    url = "https://web.telegram.org/k/"
-    driver.get(url)
-    print("Waiting for setup... Login, open web app and press enter")
-    input()
-    print("Press play...")
     
     
 class BlumClicker:
@@ -70,6 +56,8 @@ class BlumClicker:
         self.frame_height = 0
         self.game_frame = None
         self.game_canvas = None
+        self.c_pos_x = 0
+        self.c_pos_y = 0
     
     
     def get_page_screenshot(self, isTest=False):
@@ -87,14 +75,16 @@ class BlumClicker:
         return cropped_image_np
     
     def click_at_coordinates(self, x, y):
-        action = ActionChains(self.driver)
-        action.move_by_offset(x, y).click().perform()
-        
-    def click_at_game(self, x, y):
-        self.click_at_coordinates(x + self.frame_x, y + self.frame_y)
-        
+        print("Clicking at", x, y)
+        html_element = self.driver.find_element(By.TAG_NAME, 'html')
+        ActionChains(self.driver).move_to_element_with_offset(html_element, -self.frame_width/2, -self.frame_height/2).perform()
+
+        # Переместите курсор к заданным координатам и кликните
+        ActionChains(self.driver).move_by_offset(x, y).click().perform()
+    
     def setup(self):
         chrome_options = Options()
+        chrome_options.add_argument('proxy-server=http://127.0.0.1:8080')
         chrome_options.add_argument('--log-level=3')  
         self.driver = webdriver.Chrome(chrome_options)
         self.driver.set_window_position(0, 0)
@@ -119,29 +109,19 @@ class BlumClicker:
             self.frame_y = self.game_frame.location['y']
             self.frame_width = self.game_frame.size['width']
             self.frame_height = self.game_frame.size['height']
+            actions = ActionChains(self.driver)
+            actions.move_to_element_with_offset(self.game_frame, -self.frame_width/2, -self.frame_height/2).perform()
+            self.c_pos_x = 0
+            self.c_pos_y = 0 
             self.driver.switch_to.frame(self.game_frame)
         else:
             exit(0)
-            
-            
-        while self.game_canvas == None:
-            print("Finding game canvas...")
-            try:
-                self.game_canvas = WebDriverWait(self.driver, 10).until(
-                    EC.presence_of_element_located((By.CSS_SELECTOR, 'canvas[width="420"]'))
-                )
-            except Exception as e:
-                self.game_canvas = None
-                sleep(0.1)
-        print("Game canvas found")
-        
+        print("Frame location:", self.frame_x, self.frame_y, self.frame_width, self.frame_height)   
         print("Press play...")
         
-        
-        while self.game_canvas.get_attribute("style") == "display: none;":
-            self.game_canvas = WebDriverWait(self.driver, 10).until(
-                    EC.presence_of_element_located((By.CSS_SELECTOR, 'canvas[width="420"]'))
-            )        
+        WebDriverWait(self.driver, 10).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, 'a.play-btn'))
+                ).click()
         
         print("Game started")
         
@@ -156,15 +136,19 @@ class BlumClicker:
         if self.get_window_size() != [self.window_width, self.window_height]:
             self.driver.set_window_size(self.window_width, self.window_height)
             self.driver.set_window_position(0, 0)
-            
-        image = self.get_page_screenshot()
-        image, centers = detect_green_objects(image)
-        show_image(image)
-        if len(centers) > 0:
-            self.click_at_game(centers[0][0], centers[0][1])
-            print("Clicked at", centers[0][0], centers[0][1])
-        else:
-            print("No objects found")
+        try:
+            image = self.get_page_screenshot()
+            centers, image = detect_first_green_object(image)
+            show_image(image)
+            if centers is not None:
+                if centers[0] >= self.frame_width and centers[1] >= self.frame_height:
+                    print("Out of bounds")
+                else:
+                    self.click_at_coordinates(centers[0], centers[1])
+            else:
+                print("No objects found")
+        except Exception as e:
+            print(e)
         
         
     def input(self):
@@ -176,12 +160,17 @@ class BlumClicker:
         while True:
             self.input()
             self.update()
-            sleep(0.0001)
 
 
 def main():
     app = BlumClicker()
     app.run()
+    
+def test():
+    image = cv2.imread("test.png")
+    centers, image = detect_first_green_object(image)
+    cv2.imshow("Hello world", image)
+    cv2.waitKey(0)
 
 
 if __name__ == "__main__":
