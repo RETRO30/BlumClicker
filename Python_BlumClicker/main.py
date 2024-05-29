@@ -13,8 +13,37 @@ from selenium.webdriver.common.action_chains import ActionChains
 import threading
 
 
+def process_strip(image, start_y, end_y, results, index):
+    strip = image[start_y:end_y, :]
+    center, processed_strip = detect_first_green_object(strip)
+    results[index] = (center, processed_strip)
+    if center is not None:
+        center = (center[0], center[1] + start_y)
+    results[index] = (center, processed_strip)
 
 
+def detect_in_threads(image):
+    height, width, _ = image.shape
+
+    strip_height = height // 4
+    threads = []
+    results = [None] * 4
+
+    for i in range(4):
+        start_y = i * strip_height
+        end_y = (i + 1) * strip_height if i < 3 else height
+        thread = threading.Thread(target=process_strip, args=(image, start_y, end_y, results, i))
+        threads.append(thread)
+        thread.start()
+
+    for thread in threads:
+        thread.join()
+        
+    for center, _ in results:
+        if center is not None:
+            return center, image
+    # centers = [result[0] for result in results if result[0] is not None]
+    # processed_image = np.vstack([result[1] for result in results])
 
 def detect_first_green_object(image):
     hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
@@ -140,8 +169,8 @@ class BlumClicker:
             self.driver.set_window_position(0, 0)
         try:
             image = self.get_page_screenshot()
-            centers, image = detect_first_green_object(image)
-            show_image(image)
+            centers, image = detect_in_threads(image)
+            # show_image(image)
             if centers is not None:
                 if centers[0] >= self.frame_width and centers[1] >= self.frame_height:
                     print("Out of bounds")
