@@ -10,10 +10,15 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.action_chains import ActionChains
+import threading
+
+
+
+
 
 def detect_first_green_object(image):
     hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-
+    
     lower_green = np.array([35, 100, 100])
     upper_green = np.array([85, 255, 255])
 
@@ -34,7 +39,6 @@ def detect_first_green_object(image):
             return (cx, cy), image
 
     return None, image
-
 
 def show_image(image):
     cv2.imshow("Hello world", image)
@@ -58,6 +62,7 @@ class BlumClicker:
         self.game_canvas = None
         self.c_pos_x = 0
         self.c_pos_y = 0
+        self.html_element =None
     
     
     def get_page_screenshot(self, isTest=False):
@@ -65,7 +70,7 @@ class BlumClicker:
         
         image = Image.open(io.BytesIO(screenshot))
         
-        cropped_image = image.crop((self.frame_x, self.frame_y, self.frame_x+self.frame_width, self.frame_y+self.frame_height))
+        cropped_image = image.crop((self.frame_x, self.frame_y, self.frame_x+self.frame_width, self.frame_y+self.frame_height-50))
     
         cropped_image_np = np.array(cropped_image)
         
@@ -76,11 +81,11 @@ class BlumClicker:
     
     def click_at_coordinates(self, x, y):
         print("Clicking at", x, y)
-        html_element = self.driver.find_element(By.TAG_NAME, 'html')
-        ActionChains(self.driver).move_to_element_with_offset(html_element, -self.frame_width/2, -self.frame_height/2).perform()
+        
+        ActionChains(self.driver, 1).move_to_element_with_offset(self.html_element, -self.frame_width/2, -self.frame_height/2).perform()
 
         # Переместите курсор к заданным координатам и кликните
-        ActionChains(self.driver).move_by_offset(x, y).click().perform()
+        ActionChains(self.driver, 1).move_by_offset(x, y).click().perform()
     
     def setup(self):
         chrome_options = Options()
@@ -109,11 +114,8 @@ class BlumClicker:
             self.frame_y = self.game_frame.location['y']
             self.frame_width = self.game_frame.size['width']
             self.frame_height = self.game_frame.size['height']
-            actions = ActionChains(self.driver)
-            actions.move_to_element_with_offset(self.game_frame, -self.frame_width/2, -self.frame_height/2).perform()
-            self.c_pos_x = 0
-            self.c_pos_y = 0 
             self.driver.switch_to.frame(self.game_frame)
+            self.html_element = self.driver.find_element(By.TAG_NAME, 'html')
         else:
             exit(0)
         print("Frame location:", self.frame_x, self.frame_y, self.frame_width, self.frame_height)   
@@ -168,7 +170,7 @@ def main():
     
 def test():
     image = cv2.imread("test.png")
-    centers, image = detect_first_green_object(image)
+    centers, image = detect_in_area(image)
     cv2.imshow("Hello world", image)
     cv2.waitKey(0)
 
